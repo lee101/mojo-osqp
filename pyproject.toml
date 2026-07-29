@@ -1,0 +1,21 @@
+[project]
+name = "mojo-osqp"
+version = "0.1.0"
+description = "An OSQP-compatible dense QP solver with Mojo ADMM kernels"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["numpy", "scipy"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "python" }
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.pytest.ini_options]
+filterwarnings = ["ignore::PendingDeprecationWarning"]
