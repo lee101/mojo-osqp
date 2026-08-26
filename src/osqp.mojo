@@ -1,11 +1,9 @@
 """Dense OSQP-style ADMM kernels exposed through a stable C ABI."""
 
-from std.algorithm.functional import parallelize
 from std.math import sqrt
 from std.sys.info import simd_width_of as simdwidthof
 
 comptime W = simdwidthof[DType.float64]()
-comptime PARALLEL_MATVEC_WORK = 131072
 comptime MAX_DIMENSION = 1000000000
 comptime Ptr = UnsafePointer[Float64, AnyOrigin[mut=True]]
 
@@ -36,15 +34,8 @@ def dot(a: Ptr, b: Ptr, n: Int) -> Float64:
 
 
 def matvec(a: Ptr, x: Ptr, result: Ptr, rows: Int, cols: Int):
-    @parameter
-    def compute_row(row: Int):
+    for row in range(rows):
         result[row] = dot(a + row * cols, x, cols)
-
-    if rows * cols >= PARALLEL_MATVEC_WORK:
-        parallelize[compute_row](rows, 16)
-    else:
-        for row in range(rows):
-            compute_row(row)
 
 
 def diagonal_matvec(a: Ptr, x: Ptr, result: Ptr, n: Int):
