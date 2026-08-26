@@ -96,15 +96,16 @@ divided by Mojo time.
 
 | case | mojo-osqp | upstream osqp | relative |
 | --- | ---: | ---: | ---: |
-| dense setup + solve (32 vars, 64 cons) | 1.259 ms | 1.970 ms | 1.56x faster |
-| dense setup + solve (96 vars, 192 cons) | 4.546 ms | 7.254 ms | 1.60x faster |
-| box setup + solve (256 vars) | 0.583 ms | 1.126 ms | 1.93x faster |
-| warm solve (96 vars, 192 cons) | 0.452 ms | 1.376 ms | 3.04x faster |
-| q update + warm solve (96 vars, 192 cons) | 0.564 ms | 1.345 ms | 2.39x faster |
+| dense setup + solve (32 vars, 64 cons) | 0.904 ms | 1.909 ms | 2.11x faster |
+| dense setup + solve (96 vars, 192 cons) | 4.552 ms | 7.260 ms | 1.60x faster |
+| box setup + solve (256 vars) | 0.482 ms | 1.167 ms | 2.42x faster |
+| warm solve (96 vars, 192 cons) | 0.499 ms | 1.359 ms | 2.72x faster |
+| q update + warm solve (96 vars, 192 cons) | 0.524 ms | 1.270 ms | 2.42x faster |
 
 The Mojo backend is faster in all five measured cases. Dense kernels use the
-host's native `float64` SIMD width with scalar remainder loops. Large
-independent matrix-vector products use a capped parallel path. Diagonal `P`
+host's native `float64` SIMD width with scalar remainder loops. Matrix-vector
+products stay serial at the supported problem sizes because their work is
+memory-bound and thread-launch overhead does not repay itself. Diagonal `P`
 and `A` use an O(n) factor and direct
 elementwise solve instead of allocating or factoring dense n-by-n matrices.
 
@@ -138,8 +139,9 @@ origins across the C ABI. The exported functions use
 as `UnsafePointer[Float64, AnyOrigin[mut=True]]`. Every call also passes and
 validates each buffer length, rejects null non-empty buffers, and checks
 dimensions before reconstructing pointers. Python retains all owning NumPy
-arrays for the complete synchronous call. No Mojo allocation or Python callback
-occurs inside the solve loop.
+arrays for the complete synchronous call. ADMM iterations solve directly in
+the persistent `x` buffer, and vector-only updates retain the matrix and factor
+buffers. No Mojo allocation or Python callback occurs inside the solve loop.
 
 ## License
 

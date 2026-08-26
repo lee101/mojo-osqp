@@ -109,7 +109,7 @@ def test_diagonal_path_with_simd_tail():
     assert_solutions_match(ours.solve(), theirs.solve(), atol=3e-7)
 
 
-def test_matvec_simd_tail_and_parallel_threshold():
+def test_matvec_simd_tail_and_large_input():
     rng = np.random.default_rng(91)
     for rows, cols in ((5, 13), (257, 511)):
         matrix = np.ascontiguousarray(rng.normal(size=(rows, cols)))
@@ -189,6 +189,22 @@ def test_update_vectors_matches_upstream():
     ours.update(q=new_q, l=new_l, u=new_u)
     theirs.update(q=new_q, l=new_l, u=new_u)
     assert_solutions_match(ours.solve(), theirs.solve(), atol=3e-6)
+
+
+def test_q_update_reuses_matrix_and_factor_buffers():
+    P, q, A, l, u = official_problem()
+    solver = mojo_osqp.OSQP()
+    solver.setup(P=P, q=q, A=A, l=l, u=u, **TIGHT)
+    buffers = (solver._P_csc, solver._A_csc, solver._P, solver._A, solver._factor)
+    solver.update(q=np.array([-0.5, 0.25]))
+    updated = (
+        solver._P_csc,
+        solver._A_csc,
+        solver._P,
+        solver._A,
+        solver._factor,
+    )
+    assert all(old is new for old, new in zip(buffers, updated))
 
 
 def test_update_all_matrix_values():

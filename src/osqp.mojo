@@ -222,11 +222,17 @@ def build_rhs(
 
 
 def infinity_norm(values: Ptr, n: Int) -> Float64:
-    var largest = 0.0
-    for i in range(n):
+    var lanes = SIMD[DType.float64, W](0.0)
+    var i = 0
+    while i + W <= n:
+        lanes = max(lanes, abs(values.load[width=W](i)))
+        i += W
+    var largest = lanes.reduce_max()
+    while i < n:
         var value = abs(values[i])
         if value > largest:
             largest = value
+        i += 1
     return largest
 
 
@@ -253,17 +259,39 @@ def compute_residuals(
         symmetric_matvec(p, x, px, n)
         transposed_matvec(a, y, aty, m, n)
 
-    var primal = 0.0
-    for i in range(m):
+    var primal_lanes = SIMD[DType.float64, W](0.0)
+    var i = 0
+    while i + W <= m:
+        primal_lanes = max(
+            primal_lanes,
+            abs(ax.load[width=W](i) - z.load[width=W](i)),
+        )
+        i += W
+    var primal = primal_lanes.reduce_max()
+    while i < m:
         var value = abs(ax[i] - z[i])
         if value > primal:
             primal = value
+        i += 1
 
-    var dual = 0.0
-    for i in range(n):
+    var dual_lanes = SIMD[DType.float64, W](0.0)
+    i = 0
+    while i + W <= n:
+        dual_lanes = max(
+            dual_lanes,
+            abs(
+                px.load[width=W](i)
+                + q.load[width=W](i)
+                + aty.load[width=W](i)
+            ),
+        )
+        i += W
+    var dual = dual_lanes.reduce_max()
+    while i < n:
         var value = abs(px[i] + q[i] + aty[i])
         if value > dual:
             dual = value
+        i += 1
 
     var primal_scale = max(infinity_norm(ax, m), infinity_norm(z, m))
     var dual_scale = max(infinity_norm(px, n), infinity_norm(aty, n))
@@ -354,7 +382,6 @@ def mosqp_solve(
     ax_address: Int,
     px_address: Int,
     aty_address: Int,
-    rhs_address: Int,
     info_address: Int,
     n: Int,
     m: Int,
@@ -375,7 +402,6 @@ def mosqp_solve(
     ax_length: Int,
     px_length: Int,
     aty_length: Int,
-    rhs_length: Int,
     info_length: Int,
     eps_abs: Float64,
     eps_rel: Float64,
@@ -403,7 +429,6 @@ def mosqp_solve(
         or ax_length != m
         or px_length != n
         or aty_length != n
-        or rhs_length != n
         or info_length != 6
         or not valid_address(p_address, p_length)
         or not valid_address(a_address, a_length)
@@ -418,7 +443,6 @@ def mosqp_solve(
         or not valid_address(ax_address, ax_length)
         or not valid_address(px_address, px_length)
         or not valid_address(aty_address, aty_length)
-        or not valid_address(rhs_address, rhs_length)
         or not valid_address(info_address, info_length)
         or max_iter < 0
         or check_termination < 0
@@ -439,7 +463,6 @@ def mosqp_solve(
     var ax = ptr(ax_address)
     var px = ptr(px_address)
     var aty = ptr(aty_address)
-    var rhs = ptr(rhs_address)
     var info = ptr(info_address)
 
     var primal = 0.0
@@ -455,7 +478,7 @@ def mosqp_solve(
             var i = 0
             var sigma_vec = SIMD[DType.float64, W](sigma)
             while i + W <= n:
-                rhs.store(
+                x.store(
                     i,
                     (
                         sigma_vec * x.load[width=W](i)
@@ -470,22 +493,15 @@ def mosqp_solve(
                 )
                 i += W
             while i < n:
-                rhs[i] = (
+                x[i] = (
                     sigma * x[i]
                     - q[i]
                     + a[i] * (rho[i] * z[i] - y[i])
                 ) / factor[i]
                 i += 1
         else:
-            build_rhs(a, q, rho, x, y, z, rhs, n, m, sigma)
-            solve_factor(factor, rhs, n)
-        var col = 0
-        while col + W <= n:
-            x.store(col, rhs.load[width=W](col))
-            col += W
-        while col < n:
-            x[col] = rhs[col]
-            col += 1
+            build_rhs(a, q, rho, x, y, z, x, n, m, sigma)
+            solve_factor(factor, x, n)
 
         if diagonal:
             diagonal_matvec(a, x, ax, n)
@@ -550,8 +566,25 @@ def mosqp_solve(
             elif dual > adaptive_tolerance * primal and primal > 0.0:
                 scale = max(0.2, sqrt(primal / dual))
             if scale != 1.0:
-                for row in range(m):
-                    rho[row] = min(1.0e6, max(1.0e-6, rho[row] * scale))
+                var row = 0
+                var scale_vec = SIMD[DType.float64, W](scale)
+                while row + W <= m:
+                    rho.store(
+                        row,
+                        min(
+                            SIMD[DType.float64, W](1.0e6),
+                            max(
+                                SIMD[DType.float64, W](1.0e-6),
+                                rho.load[width=W](row) * scale_vec,
+                            ),
+                        ),
+                    )
+                    row += W
+                while row < m:
+                    rho[row] = min(
+                        1.0e6, max(1.0e-6, rho[row] * scale)
+                    )
+                    row += 1
                 if not factor_system(
                     p, a, rho, factor, n, m, sigma, diagonal
                 ):

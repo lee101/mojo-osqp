@@ -114,7 +114,7 @@ def _as_csc(matrix, shape, name):
     else:
         matrix = matrix.copy()
     matrix.sort_indices()
-    matrix = matrix.astype(np.float64)
+    matrix = matrix.astype(np.float64, copy=False)
     if not np.all(np.isfinite(matrix.data)):
         raise ValueError(f"{name} must contain only finite values")
     return matrix
@@ -166,7 +166,8 @@ class OSQP:
             assert l is not None or u is not None, "If A is specified, specify at least one of l/u."
 
         P_csc = _as_csc(P, (n, n), "P")
-        if sparse.tril(P_csc, -1).nnz:
+        p_columns = np.repeat(np.arange(n), np.diff(P_csc.indptr))
+        if np.any(P_csc.indices > p_columns):
             P_csc = sparse.triu(P_csc, format="csc")
         A_csc = _as_csc(A, (m, n), "A")
         q_array = np.zeros(n) if q is None else f64(q).ravel()
@@ -230,7 +231,6 @@ class OSQP:
         self._ax = np.empty(m, dtype=np.float64)
         self._px = np.empty(n, dtype=np.float64)
         self._aty = np.empty(n, dtype=np.float64)
-        self._rhs = np.empty(n, dtype=np.float64)
         self._info_buffer = np.empty(6, dtype=np.float64)
         self._set_rho_vector()
 
@@ -296,7 +296,6 @@ class OSQP:
             addr(self._ax),
             addr(self._px),
             addr(self._aty),
-            addr(self._rhs),
             addr(self._info_buffer),
             self.n,
             self.m,
@@ -317,7 +316,6 @@ class OSQP:
             self._ax.size,
             self._px.size,
             self._aty.size,
-            self._rhs.size,
             self._info_buffer.size,
             float(self.settings.eps_abs),
             float(self.settings.eps_rel),
@@ -365,26 +363,26 @@ class OSQP:
         started = time.perf_counter()
         q, lower, upper = kwargs.pop("q", None), kwargs.pop("l", None), kwargs.pop("u", None)
         bounds_changed = lower is not None or upper is not None
-        next_q = self._q.copy()
-        next_l = self._l.copy()
-        next_u = self._u.copy()
+        next_q = self._q
+        next_l = self._l
+        next_u = self._u
         if q is not None:
             value = f64(q).ravel()
             if value.size != self.n:
                 raise ValueError("Incorrect dimension of q")
             if not np.all(np.isfinite(value)):
                 raise ValueError("q must contain only finite values")
-            next_q[:] = value
+            next_q = value
         if lower is not None:
             value = np.maximum(f64(lower).ravel(), -OSQP_INFTY)
             if value.size != self.m:
                 raise ValueError("Incorrect dimension of l")
-            next_l[:] = value
+            next_l = value
         if upper is not None:
             value = np.minimum(f64(upper).ravel(), OSQP_INFTY)
             if value.size != self.m:
                 raise ValueError("Incorrect dimension of u")
-            next_u[:] = value
+            next_u = value
         if np.any(np.isnan(next_l)) or np.any(np.isnan(next_u)):
             raise ValueError("bounds must not contain NaN")
         if np.any(next_l > next_u):
@@ -394,7 +392,7 @@ class OSQP:
         unknown = set(kwargs) - {"Px", "Px_idx", "Ax", "Ax_idx"}
         if unknown:
             raise ValueError(f"Unrecognized update fields {sorted(unknown)}")
-        next_matrices = {"P": self._P_csc.copy(), "A": self._A_csc.copy()}
+        next_matrices = {"P": self._P_csc, "A": self._A_csc}
         for name, matrix in next_matrices.items():
             values = kwargs.pop(f"{name}x", None)
             indices = kwargs.pop(f"{name}x_idx", None)
@@ -404,6 +402,8 @@ class OSQP:
                 values = f64(values).ravel()
                 if not np.all(np.isfinite(values)):
                     raise ValueError(f"{name}x must contain only finite values")
+                matrix = matrix.copy()
+                next_matrices[name] = matrix
                 if indices is None:
                     if len(values) != len(matrix.data):
                         raise ValueError(
@@ -423,9 +423,12 @@ class OSQP:
                         raise IndexError(f"{name}x_idx contains an out-of-range index")
                     matrix.data[indices] = values
                 matrix_changed = True
-        self._q[:] = next_q
-        self._l[:] = next_l
-        self._u[:] = next_u
+        if q is not None:
+            self._q[:] = next_q
+        if lower is not None:
+            self._l[:] = next_l
+        if upper is not None:
+            self._u[:] = next_u
         if matrix_changed:
             self._P_csc = next_matrices["P"]
             self._A_csc = next_matrices["A"]

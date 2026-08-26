@@ -18,7 +18,7 @@ F = ctypes.c_double
 _SIGNATURES = {
     "mosqp_factor": ([I] * 11 + [F], I),
     "mosqp_matvec": ([I] * 8, I),
-    "mosqp_solve": ([I] * 36 + [F] * 5, I),
+    "mosqp_solve": ([I] * 34 + [F] * 5, I),
 }
 
 
