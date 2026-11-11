@@ -24,7 +24,7 @@ def dot(a: Ptr, b: Ptr, n: Int) -> Float64:
     var accum = SIMD[DType.float64, W](0.0)
     var i = 0
     while i + W <= n:
-        accum += a.load[width=W](i) * b.load[width=W](i)
+        accum += a.unsafe_load[width=W](i) * b.unsafe_load[width=W](i)
         i += W
     var total = accum.reduce_add()
     while i < n:
@@ -43,7 +43,7 @@ def diagonal_matvec(a: Ptr, x: Ptr, result: Ptr, n: Int):
     while i + W <= n:
         result.store(
             i,
-            a.load[width=W](i) * x.load[width=W](i),
+            a.unsafe_load[width=W](i) * x.unsafe_load[width=W](i),
         )
         i += W
     while i < n:
@@ -67,7 +67,7 @@ def transposed_matvec(a: Ptr, x: Ptr, result: Ptr, rows: Int, cols: Int):
         while col + W <= cols:
             result.store(
                 col,
-                result.load[width=W](col) + arow.load[width=W](col) * value,
+                result.unsafe_load[width=W](col) + arow.unsafe_load[width=W](col) * value,
             )
             col += W
         while col < cols:
@@ -94,12 +94,12 @@ def factor_system(
         var i = 0
         var sigma_vec = SIMD[DType.float64, W](sigma)
         while i + W <= n:
-            var a_vec = a.load[width=W](i)
+            var a_vec = a.unsafe_load[width=W](i)
             factor.store(
                 i,
-                p.load[width=W](i)
+                p.unsafe_load[width=W](i)
                 + sigma_vec
-                + rho.load[width=W](i) * a_vec * a_vec,
+                + rho.unsafe_load[width=W](i) * a_vec * a_vec,
             )
             i += W
         while i < n:
@@ -115,7 +115,7 @@ def factor_system(
         var p_row = p + row * n
         var col = 0
         while col + W <= row + 1:
-            factor_row.store(col, p_row.load[width=W](col))
+            factor_row.store(col, p_row.unsafe_load[width=W](col))
             col += W
         while col < row + 1:
             factor_row[col] = p_row[col]
@@ -134,8 +134,8 @@ def factor_system(
                 while col + W <= row + 1:
                     factor_row.store(
                         col,
-                        factor_row.load[width=W](col)
-                        + scaled_vec * arow.load[width=W](col),
+                        factor_row.unsafe_load[width=W](col)
+                        + scaled_vec * arow.unsafe_load[width=W](col),
                     )
                     col += W
                 while col < row + 1:
@@ -171,8 +171,8 @@ def solve_factor(factor: Ptr, rhs: Ptr, n: Int):
         while col + W <= row:
             rhs.store(
                 col,
-                rhs.load[width=W](col)
-                - factor_row.load[width=W](col) * value,
+                rhs.unsafe_load[width=W](col)
+                - factor_row.unsafe_load[width=W](col) * value,
             )
             col += W
         while col < row:
@@ -197,7 +197,7 @@ def build_rhs(
     while col + W <= n:
         rhs.store(
             col,
-            sigma_vec * x.load[width=W](col) - q.load[width=W](col),
+            sigma_vec * x.unsafe_load[width=W](col) - q.unsafe_load[width=W](col),
         )
         col += W
     while col < n:
@@ -212,8 +212,8 @@ def build_rhs(
         while col + W <= n:
             rhs.store(
                 col,
-                rhs.load[width=W](col)
-                + arow.load[width=W](col) * value_vec,
+                rhs.unsafe_load[width=W](col)
+                + arow.unsafe_load[width=W](col) * value_vec,
             )
             col += W
         while col < n:
@@ -225,7 +225,7 @@ def infinity_norm(values: Ptr, n: Int) -> Float64:
     var lanes = SIMD[DType.float64, W](0.0)
     var i = 0
     while i + W <= n:
-        lanes = max(lanes, abs(values.load[width=W](i)))
+        lanes = max(lanes, abs(values.unsafe_load[width=W](i)))
         i += W
     var largest = lanes.reduce_max()
     while i < n:
@@ -264,7 +264,7 @@ def compute_residuals(
     while i + W <= m:
         primal_lanes = max(
             primal_lanes,
-            abs(ax.load[width=W](i) - z.load[width=W](i)),
+            abs(ax.unsafe_load[width=W](i) - z.unsafe_load[width=W](i)),
         )
         i += W
     var primal = primal_lanes.reduce_max()
@@ -280,9 +280,9 @@ def compute_residuals(
         dual_lanes = max(
             dual_lanes,
             abs(
-                px.load[width=W](i)
-                + q.load[width=W](i)
-                + aty.load[width=W](i)
+                px.unsafe_load[width=W](i)
+                + q.unsafe_load[width=W](i)
+                + aty.unsafe_load[width=W](i)
             ),
         )
         i += W
@@ -481,15 +481,15 @@ def mosqp_solve(
                 x.store(
                     i,
                     (
-                        sigma_vec * x.load[width=W](i)
-                        - q.load[width=W](i)
-                        + a.load[width=W](i)
+                        sigma_vec * x.unsafe_load[width=W](i)
+                        - q.unsafe_load[width=W](i)
+                        + a.unsafe_load[width=W](i)
                         * (
-                            rho.load[width=W](i) * z.load[width=W](i)
-                            - y.load[width=W](i)
+                            rho.unsafe_load[width=W](i) * z.unsafe_load[width=W](i)
+                            - y.unsafe_load[width=W](i)
                         )
                     )
-                    / factor.load[width=W](i),
+                    / factor.unsafe_load[width=W](i),
                 )
                 i += W
             while i < n:
@@ -511,18 +511,18 @@ def mosqp_solve(
         var alpha_vec = SIMD[DType.float64, W](alpha)
         var one_minus_alpha = SIMD[DType.float64, W](1.0 - alpha)
         while row + W <= m:
-            var old_z = z.load[width=W](row)
-            var relaxed = alpha_vec * ax.load[width=W](row) + one_minus_alpha * old_z
-            var rho_vec = rho.load[width=W](row)
-            var projected = relaxed + y.load[width=W](row) / rho_vec
+            var old_z = z.unsafe_load[width=W](row)
+            var relaxed = alpha_vec * ax.unsafe_load[width=W](row) + one_minus_alpha * old_z
+            var rho_vec = rho.unsafe_load[width=W](row)
+            var projected = relaxed + y.unsafe_load[width=W](row) / rho_vec
             projected = max(
-                lower.load[width=W](row),
-                min(upper.load[width=W](row), projected),
+                lower.unsafe_load[width=W](row),
+                min(upper.unsafe_load[width=W](row), projected),
             )
             z.store(row, projected)
             y.store(
                 row,
-                y.load[width=W](row) + rho_vec * (relaxed - projected),
+                y.unsafe_load[width=W](row) + rho_vec * (relaxed - projected),
             )
             row += W
         while row < m:
@@ -575,7 +575,7 @@ def mosqp_solve(
                             SIMD[DType.float64, W](1.0e6),
                             max(
                                 SIMD[DType.float64, W](1.0e-6),
-                                rho.load[width=W](row) * scale_vec,
+                                rho.unsafe_load[width=W](row) * scale_vec,
                             ),
                         ),
                     )
